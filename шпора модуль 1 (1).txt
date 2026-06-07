@@ -1,0 +1,84 @@
+Модуль 1
+
+su -
+apt-get update
+apt-get install -y MySQL-server
+apt-get install mysql-workbench-community
+systemctl enable --now mysqld
+systemctl status mysqld.service
+sed -i "s/skip-networking/#skip-networking/g" /etc/my.cnf.d/server.cnf
+ss -tlpn
+mysql -u root
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'root';
+systemctl restart mysqld
+mysql -u root -p
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost';
+UPDATE mysql.user SET host='%' WHERE user='root';
+select user, host from mysql.user;
+CREATE USER 'sa'@'%' IDENTIFIED BY 'De_19';
+hostnamectl set-hostname Server_19
+show variables like 'hostname';
+INSTALL PLUGIN mysql_native_password SONAME 'mysql_native_password.so';
+ALTER USER 'sa'@'%' IDENTIFIED WITH mysql_native_password BY 'De_19';
+FLUSH PRIVILEGES;
+SELECT user, host, plugin FROM mysql.user;
+
+(?)
+[mysqld]
+# Разрешаем оба типа аутентификации
+default_authentication_plugin=caching_sha2_password
+
+# Включаем поддержку старого, но привычного способа
+mysql_native_password=ON
+
+GRANT ALL PRIVILEGES ON bd.* TO 'sa'@'%' WITH GRANT OPTION;
+
+
+create database bd;
+use db;
+
+create database bd;
+create table Users(
+id INT PRIMARY KEY AUTO_INCREMENT,
+username VARCHAR(50),
+password_enc VARCHAR(255),
+role VARCHAR(45)
+);
+
+DELIMITER $$
+CREATE PROCEDURE create_dbs()
+begin
+declare i int default 1;
+declare db_name VARCHAR(50);
+declare user_name VARCHAR(50);
+declare passwd VARCHAR(255);
+
+while i <= 10 do
+	SET db_name = CONCAT('BD',i);
+    set user_name = concat('user',i);
+    set passwd = SUBSTRING(MD5(RAND()), 1, 5);
+    
+    SET @sql = CONCAT('CREATE DATABASE IF NOT EXISTS`', db_name, '`');
+    PREPARE s from @sql;
+    execute s;
+    deallocate prepare s;
+    
+    set @sql = concat('create user if not exists''', user_name, '''@''localhost'' identified by ''', passwd, '''');
+    prepare s from @sql;
+    execute s;
+    deallocate prepare s;
+    
+    set @sql = concat('grant all privileges on `', db_name, '`.* to ''', user_name, '''@''localhost''');
+    prepare s from @sql;
+    execute s;
+    deallocate prepare s;
+    
+    insert into Users(username, password_enc) values (user_name, passwd);
+    set i = i + 1;
+    
+END WHILE;
+end $$
+DELIMITER ;
+
+call create_dbs;
+select mu.user, mu.host, d.db from mysql.user mu join mysql.db d on mu.user = d.user and mu.host = d.host;
