@@ -1,0 +1,311 @@
+DROP DATABASE IF EXISTS BD;
+CREATE DATABASE BD;
+USE BD;
+
+-- =====================================
+-- МОДУЛЬ 1
+-- =====================================
+
+CREATE TABLE Users
+(
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    login_user VARCHAR(20),
+    pass_user VARCHAR(50)
+);
+
+DELIMITER $$
+
+CREATE PROCEDURE CreateAll()
+BEGIN
+
+    DECLARE i INT DEFAULT 1;
+
+    WHILE i <= 10 DO
+
+        SET @db = CONCAT('BD',i);
+        SET @user = CONCAT('user',i);
+        SET @pass = CONCAT('pass',i);
+
+        SET @sql = CONCAT('CREATE DATABASE ',@db);
+
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+
+        SET @sql = CONCAT(
+        'CREATE USER ''',
+        @user,
+        '''@''localhost'' IDENTIFIED BY ''',
+        @pass,
+        '''');
+
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+
+        SET @sql = CONCAT(
+        'GRANT ALL PRIVILEGES ON ',
+        @db,
+        '.* TO ''',
+        @user,
+        '''@''localhost'''
+        );
+
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+
+        INSERT INTO Users(login_user, pass_user)
+        VALUES(@user,@pass);
+
+        SET i=i+1;
+
+    END WHILE;
+
+END$$
+
+DELIMITER ;
+
+CALL CreateAll();
+
+-- =====================================
+-- МОДУЛЬ 2 (SAFE MODE FIX)
+-- =====================================
+
+UPDATE Users
+SET pass_user = TO_BASE64(AES_ENCRYPT(pass_user,'key123'))
+WHERE user_id > 0;
+
+SELECT
+login_user,
+CAST(AES_DECRYPT(FROM_BASE64(pass_user),'key123') AS CHAR) AS password
+FROM Users;
+
+-- =====================================
+-- МОДУЛЬ 4 (3НФ СТРУКТУРА)
+-- =====================================
+
+CREATE TABLE Customers
+(
+    customer_id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_name VARCHAR(100),
+    city VARCHAR(100),
+    phone VARCHAR(30)
+);
+
+CREATE TABLE Materials
+(
+    material_id INT AUTO_INCREMENT PRIMARY KEY,
+    material_name VARCHAR(100),
+    material_price DECIMAL(10,2)
+);
+
+CREATE TABLE Products
+(
+    product_id INT AUTO_INCREMENT PRIMARY KEY,
+    product_name VARCHAR(100)
+);
+
+CREATE TABLE ProductMaterials
+(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT,
+    material_id INT,
+    quantity DECIMAL(10,2),
+
+    FOREIGN KEY(product_id) REFERENCES Products(product_id),
+    FOREIGN KEY(material_id) REFERENCES Materials(material_id)
+);
+
+CREATE TABLE Orders
+(
+    order_id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT,
+    order_date DATE,
+    total_sum DECIMAL(12,2) DEFAULT 0,
+
+    FOREIGN KEY(customer_id) REFERENCES Customers(customer_id)
+);
+
+CREATE TABLE OrderItems
+(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT,
+    product_id INT,
+    quantity INT,
+
+    FOREIGN KEY(order_id) REFERENCES Orders(order_id),
+    FOREIGN KEY(product_id) REFERENCES Products(product_id)
+);
+
+-- =====================================
+-- ТЕСТОВЫЕ ДАННЫЕ (ВОССТАНОВЛЕНО)
+-- =====================================
+
+INSERT INTO Customers(customer_name,city,phone)
+VALUES
+('ООО Ассоль','Калуга','79111111111'),
+('ООО Кипяток','Пятигорск','79222222222'),
+('ООО Тостовка','Ставрополь','79333333333');
+
+INSERT INTO Materials(material_name,material_price)
+VALUES
+('Сталь',100),
+('Пластик',50),
+('Алюминий',200);
+
+INSERT INTO Products(product_name)
+VALUES
+('Изделие А'),
+('Изделие Б'),
+('Изделие В');
+
+INSERT INTO ProductMaterials(product_id,material_id,quantity)
+VALUES
+(1,1,2),
+(2,2,3),
+(3,3,1);
+
+INSERT INTO Orders(customer_id,order_date)
+VALUES
+(1,'2026-06-01'),
+(2,'2026-06-10'),
+(3,'2026-07-01');
+
+INSERT INTO OrderItems(order_id,product_id,quantity)
+VALUES
+(1,1,5),
+(2,2,3),
+(3,3,2);
+
+-- =====================================
+-- МОДУЛЬ 5 (ПРОЦЕДУРЫ + ТРИГГЕР)
+-- =====================================
+
+DELIMITER $$
+
+CREATE PROCEDURE GetOrdersInfo(
+    IN p_start DATE,
+    IN p_end DATE
+)
+BEGIN
+SELECT
+c.customer_name,
+COUNT(DISTINCT o.order_id) AS orders_count,
+SUM(oi.quantity) AS products_count,
+SUM(o.total_sum) AS total_amount
+FROM Orders o
+JOIN Customers c ON c.customer_id=o.customer_id
+JOIN OrderItems oi ON oi.order_id=o.order_id
+WHERE o.order_date BETWEEN p_start AND p_end
+GROUP BY c.customer_name;
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
+CREATE TRIGGER trg_order_sum
+AFTER INSERT ON OrderItems
+FOR EACH ROW
+BEGIN
+UPDATE Orders
+SET total_sum =
+(
+SELECT SUM(pm.quantity * m.material_price * oi.quantity)
+FROM OrderItems oi
+JOIN ProductMaterials pm ON pm.product_id=oi.product_id
+JOIN Materials m ON m.material_id=pm.material_id
+WHERE oi.order_id=NEW.order_id
+)
+WHERE order_id=NEW.order_id;
+END$$
+
+DELIMITER ;
+
+-- =====================================
+-- МОДУЛЬ 6
+-- =====================================
+
+CREATE TABLE Order_may AS
+SELECT * FROM Orders WHERE 1=0;
+
+INSERT INTO Order_may
+SELECT * FROM Orders
+WHERE MONTH(order_date)=5;
+
+DELETE FROM Orders
+WHERE order_id > 0
+AND MONTH(order_date)=5;
+
+-- =====================================
+-- ПРОЦЕДУРЫ ДЛЯ PYTHON
+-- =====================================
+
+DELIMITER $$
+
+CREATE PROCEDURE GetAllOrders()
+BEGIN
+SELECT
+c.customer_name,
+c.city,
+c.phone,
+o.order_date,
+o.total_sum
+FROM Orders o
+JOIN Customers c ON c.customer_id=o.customer_id;
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
+CREATE PROCEDURE GetOrdersByCustomer(
+IN p_customer VARCHAR(100)
+)
+BEGIN
+SELECT
+c.customer_name,
+c.city,
+c.phone,
+o.order_date,
+o.total_sum
+FROM Orders o
+JOIN Customers c ON c.customer_id=o.customer_id
+WHERE c.customer_name=p_customer;
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
+CREATE PROCEDURE SortOrders(
+    IN p_field VARCHAR(30),
+    IN p_order VARCHAR(20)
+)
+BEGIN
+
+    DECLARE v_order VARCHAR(4);
+
+    IF p_order = 'По возрастанию' THEN
+        SET v_order = 'ASC';
+    ELSEIF p_order = 'По убыванию' THEN
+        SET v_order = 'DESC';
+    ELSE
+        SET v_order = 'ASC';
+    END IF;
+
+    SET @sql = CONCAT(
+        'SELECT c.customer_name, c.city, c.phone, o.order_date, o.total_sum
+         FROM Orders o
+         JOIN Customers c ON c.customer_id=o.customer_id
+         ORDER BY ', p_field, ' ', v_order
+    );
+
+    PREPARE stmt FROM @sql;
+    EXECUTE stmt;
+    DEALLOCATE PREPARE stmt;
+
+END$$
+
+DELIMITER ;

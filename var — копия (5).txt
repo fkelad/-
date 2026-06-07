@@ -1,0 +1,242 @@
+import sys
+import pymysql
+
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QComboBox,
+    QPushButton,
+    QLineEdit,
+    QListWidget,
+    QRadioButton,
+    QTableWidget,
+    QTableWidgetItem
+)
+
+from PyQt6.QtGui import QColor
+
+
+class Window(QFrame):
+
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Работа с заказами")
+        self.resize(900, 500)
+
+        self.conn = pymysql.connect(
+            host="localhost",
+            user="root",
+            password="root",
+            database="bd",
+            charset="utf8mb4"
+        )
+
+        self.cursor = self.conn.cursor()
+
+        self.create_ui()
+
+        self.load_clients()
+        self.execute_proc("GetAllOrders")
+
+    def create_ui(self):
+
+        layout = QVBoxLayout()
+
+        row1 = QHBoxLayout()
+
+        row1.addWidget(QLabel("Заказчик"))
+
+        self.combo = QComboBox()
+        row1.addWidget(self.combo)
+
+        btn_filter = QPushButton("Фильтровать")
+        btn_filter.clicked.connect(self.filter_orders)
+
+        btn_all = QPushButton("Показать все")
+        btn_all.clicked.connect(
+            lambda: self.execute_proc("GetAllOrders")
+        )
+
+        row1.addWidget(btn_filter)
+        row1.addWidget(btn_all)
+
+        layout.addLayout(row1)
+
+        row2 = QHBoxLayout()
+
+        self.search = QLineEdit()
+
+        btn_search = QPushButton("Найти")
+        btn_search.clicked.connect(self.search_cells)
+
+        row2.addWidget(self.search)
+        row2.addWidget(btn_search)
+
+        layout.addLayout(row2)
+
+        row3 = QHBoxLayout()
+
+        self.fields = QListWidget()
+        self.fields.addItems([
+            "customer_name",
+            "order_date",
+            "total_sum"
+        ])
+
+        self.asc = QRadioButton("По возрастанию")
+        self.desc = QRadioButton("По убыванию")
+
+        self.asc.toggled.connect(self.sort_orders)
+        self.desc.toggled.connect(self.sort_orders)
+
+        row3.addWidget(self.fields)
+        row3.addWidget(self.asc)
+        row3.addWidget(self.desc)
+
+        layout.addLayout(row3)
+
+        self.table = QTableWidget()
+
+        self.table.setColumnCount(5)
+
+        self.table.setHorizontalHeaderLabels([
+            "Заказчик",
+            "Город",
+            "Телефон",
+            "Дата",
+            "Сумма"
+        ])
+
+        layout.addWidget(self.table)
+
+        self.lbl_count = QLabel()
+        self.lbl_sum = QLabel()
+
+        layout.addWidget(self.lbl_count)
+        layout.addWidget(self.lbl_sum)
+
+        self.setLayout(layout)
+
+    def load_clients(self):
+
+        self.cursor.execute(
+            "SELECT customer_name FROM Customers"
+        )
+
+        for row in self.cursor.fetchall():
+            self.combo.addItem(str(row[0]))
+
+    def execute_proc(self, proc, params=None):
+
+        rows = []
+
+        try:
+            self.cursor.callproc(proc, params or [])
+
+            while True:
+
+                result = self.cursor.fetchall()
+
+                if result:
+                    rows = result
+
+                if not self.cursor.nextset():
+                    break
+
+        except Exception as e:
+            print("Ошибка:", e)
+
+        self.show_data(rows)
+
+    def show_data(self, rows):
+
+        self.table.setRowCount(len(rows))
+
+        total = 0
+
+        for r, row in enumerate(rows):
+
+            for c, value in enumerate(row):
+
+                self.table.setItem(
+                    r,
+                    c,
+                    QTableWidgetItem(str(value))
+                )
+
+            try:
+                total += float(row[4])
+            except:
+                pass
+
+        self.lbl_count.setText(
+            f"Всего заказов: {len(rows)}"
+        )
+
+        self.lbl_sum.setText(
+            f"Общая сумма: {total}"
+        )
+
+    def filter_orders(self):
+
+        self.execute_proc(
+            "GetOrdersByCustomer",
+            [self.combo.currentText()]
+        )
+
+    def sort_orders(self):
+
+        item = self.fields.currentItem()
+
+        if not item:
+            return
+
+        order = "По возрастанию"
+
+        if self.desc.isChecked():
+            order = "По убыванию"
+
+        self.execute_proc(
+            "SortOrders",
+            [item.text(), order]
+        )
+
+    def search_cells(self):
+
+        text = self.search.text().lower()
+
+        for row in range(self.table.rowCount()):
+
+            for col in range(self.table.columnCount()):
+
+                item = self.table.item(row, col)
+
+                if not item:
+                    continue
+
+                if text in item.text().lower():
+                    item.setBackground(QColor("yellow"))
+                else:
+                    item.setBackground(QColor("white"))
+
+    def closeEvent(self, event):
+
+        try:
+            self.cursor.close()
+            self.conn.close()
+        except:
+            pass
+
+        event.accept()
+
+
+app = QApplication(sys.argv)
+
+window = Window()
+window.show()
+
+sys.exit(app.exec())
