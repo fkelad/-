@@ -1,0 +1,4 @@
+cd /home/sa
+mysqldump -u root -p bd > bd.sql ИЛИ mysqldump -u root -p -R database_name > database_name.sql
+mysql -u root -p -e "create database bd_copy";
+mysql -u root -p bd_copy < bd.sql

@@ -1,0 +1,25 @@
+CREATE DEFINER=`root`@`127.0.0.1` PROCEDURE `shifr_pswrds`()
+BEGIN
+    DECLARE encryption_key VARCHAR(128);
+    SET encryption_key = 'strong_password_123!@#';
+    
+    UPDATE users 
+    SET password_enc = TO_BASE64(AES_ENCRYPT(password_enc, encryption_key))
+    WHERE password_enc IS NOT NULL 
+      AND password_enc != '' 
+      AND LENGTH(password_enc) > 0;
+END
+
+CREATE DEFINER=`root`@`127.0.0.1` PROCEDURE `show_decrypted_users`()
+BEGIN
+    DECLARE decryption_key VARCHAR(128);
+    SET decryption_key = 'strong_password_123!@#';
+    
+    SELECT 
+        id,
+        username,
+        CAST(AES_DECRYPT(FROM_BASE64(password_enc), decryption_key) AS CHAR) AS decrypted_password
+    FROM users 
+    WHERE password_enc IS NOT NULL 
+      AND password_enc != '';
+END

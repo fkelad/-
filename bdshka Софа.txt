@@ -1,0 +1,298 @@
+-- =====================================================
+--   БАЗА ДАННЫХ: Управление производством и продажами
+--   СУБД: MySQL
+--   Нормальная форма: 3НФ
+-- =====================================================
+
+-- Удаляем базу, если существует, и создаем заново
+DROP DATABASE IF EXISTS MilkProduction;
+CREATE DATABASE MilkProduction;
+USE MilkProduction;
+
+-- =====================================================
+-- 1. ТАБЛИЦА Customers (Заказчики)
+-- =====================================================
+CREATE TABLE Customers (
+    customer_id INT AUTO_INCREMENT PRIMARY KEY,
+    external_id VARCHAR(20) UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    inn VARCHAR(20),
+    address TEXT,
+    phone VARCHAR(20),
+    is_salesman BOOLEAN DEFAULT FALSE,
+    is_buyer BOOLEAN DEFAULT FALSE
+);
+
+-- =====================================================
+-- 2. ТАБЛИЦА Materials (Материалы)
+-- =====================================================
+CREATE TABLE Materials (
+    material_id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    unit VARCHAR(20) NOT NULL,
+    price DECIMAL(15, 2)
+);
+
+-- =====================================================
+-- 3. ТАБЛИЦА Products (Продукция)
+-- =====================================================
+CREATE TABLE Products (
+    product_id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    unit VARCHAR(20) NOT NULL,
+    price DECIMAL(15, 2)
+);
+
+-- =====================================================
+-- 4. ТАБЛИЦА Specifications (Спецификации)
+-- =====================================================
+CREATE TABLE Specifications (
+    spec_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    product_id INT NOT NULL,
+    quantity_per_product DECIMAL(15, 3) DEFAULT 1,
+    FOREIGN KEY (product_id) REFERENCES Products(product_id)
+);
+
+-- =====================================================
+-- 5. ТАБЛИЦА SpecificationMaterials (Состав спецификации)
+-- =====================================================
+CREATE TABLE SpecificationMaterials (
+    spec_material_id INT AUTO_INCREMENT PRIMARY KEY,
+    spec_id INT NOT NULL,
+    material_id INT NOT NULL,
+    quantity DECIMAL(15, 5) NOT NULL,
+    FOREIGN KEY (spec_id) REFERENCES Specifications(spec_id),
+    FOREIGN KEY (material_id) REFERENCES Materials(material_id),
+    UNIQUE KEY unique_spec_material (spec_id, material_id)
+);
+
+-- =====================================================
+-- 6. ТАБЛИЦА Orders (Заказы покупателей)
+-- =====================================================
+CREATE TABLE Orders (
+    order_id INT AUTO_INCREMENT PRIMARY KEY,
+    order_number VARCHAR(50) UNIQUE NOT NULL,
+    order_date DATE NOT NULL,
+    customer_id INT NOT NULL,
+    total_amount DECIMAL(15, 2) DEFAULT 0,
+    FOREIGN KEY (customer_id) REFERENCES Customers(customer_id)
+);
+
+-- =====================================================
+-- 7. ТАБЛИЦА OrderItems (Позиции заказа)
+-- =====================================================
+CREATE TABLE OrderItems (
+    order_item_id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity DECIMAL(15, 3) NOT NULL,
+    unit_price DECIMAL(15, 2) NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES Orders(order_id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES Products(product_id)
+);
+
+-- =====================================================
+-- 8. ТАБЛИЦА Production (Производственные партии)
+-- =====================================================
+CREATE TABLE Production (
+    production_id INT AUTO_INCREMENT PRIMARY KEY,
+    production_number VARCHAR(50) UNIQUE NOT NULL,
+    production_date DATE NOT NULL
+);
+
+-- =====================================================
+-- 9. ТАБЛИЦА ProductionProducts (Выпуск продукции)
+-- =====================================================
+CREATE TABLE ProductionProducts (
+    production_product_id INT AUTO_INCREMENT PRIMARY KEY,
+    production_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity DECIMAL(15, 3) NOT NULL,
+    FOREIGN KEY (production_id) REFERENCES Production(production_id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES Products(product_id)
+);
+
+-- =====================================================
+-- 10. ТАБЛИЦА ProductionMaterials (Расход материалов)
+-- =====================================================
+CREATE TABLE ProductionMaterials (
+    production_material_id INT AUTO_INCREMENT PRIMARY KEY,
+    production_id INT NOT NULL,
+    material_id INT NOT NULL,
+    quantity DECIMAL(15, 5) NOT NULL,
+    FOREIGN KEY (production_id) REFERENCES Production(production_id) ON DELETE CASCADE,
+    FOREIGN KEY (material_id) REFERENCES Materials(material_id)
+);
+
+-- =====================================================
+-- ТРИГГЕР: Автоматический расчет итоговой суммы заказа
+-- Срабатывает после добавления, обновления, удаления позиций
+-- =====================================================
+
+DELIMITER //
+
+CREATE TRIGGER update_order_total_after_insert
+AFTER INSERT ON OrderItems
+FOR EACH ROW
+BEGIN
+    UPDATE Orders o
+    SET o.total_amount = (
+        SELECT COALESCE(SUM(oi.quantity * oi.unit_price), 0)
+        FROM OrderItems oi
+        WHERE oi.order_id = NEW.order_id
+    )
+    WHERE o.order_id = NEW.order_id;
+END //
+
+CREATE TRIGGER update_order_total_after_update
+AFTER UPDATE ON OrderItems
+FOR EACH ROW
+BEGIN
+    UPDATE Orders o
+    SET o.total_amount = (
+        SELECT COALESCE(SUM(oi.quantity * oi.unit_price), 0)
+        FROM OrderItems oi
+        WHERE oi.order_id = NEW.order_id
+    )
+    WHERE o.order_id = NEW.order_id;
+END //
+
+CREATE TRIGGER update_order_total_after_delete
+AFTER DELETE ON OrderItems
+FOR EACH ROW
+BEGIN
+    UPDATE Orders o
+    SET o.total_amount = (
+        SELECT COALESCE(SUM(oi.quantity * oi.unit_price), 0)
+        FROM OrderItems oi
+        WHERE oi.order_id = OLD.order_id
+    )
+    WHERE o.order_id = OLD.order_id;
+END //
+
+DELIMITER ;
+
+-- =====================================================
+-- ТЕСТОВЫЕ ДАННЫЕ (минимум 3 записи в каждую таблицу)
+-- =====================================================
+
+-- 1. Customers
+INSERT INTO Customers (external_id, name, inn, address, phone, is_salesman, is_buyer) VALUES
+('000000001', 'ООО "Поставка"', '', 'г.Пятигорск', '+79198634592', TRUE, TRUE),
+('000000002', 'ООО "Кинотеатр Квант"', '26320045123', 'г. Железноводск, ул. Мира, 123', '+79884581555', TRUE, FALSE),
+('000000010', 'ООО "Ассоль"', '2629011278', 'г. Калуга, ул. Пушкина, 94', '+79184572398', FALSE, TRUE);
+
+-- 2. Materials
+INSERT INTO Materials (code, name, unit, price) VALUES
+('НФ-00000004', 'Молоко нормализованное', 'кг', 34.00),
+('НФ-00000005', 'Закваска сметанная', 'кг', 45.00),
+('НФ-00000006', 'Сметана классическая 15% 540г.', 'шт', 89.00);
+
+-- 3. Products
+INSERT INTO Products (code, name, unit, price) VALUES
+('ПР-000001', 'Кефир 2,5% 900г.', 'шт', 80.00),
+('ПР-000002', 'Кефир 3,2% 900г.', 'шт', 82.00),
+('ПР-000003', 'Молоко 2,5% 900г.', 'шт', 70.00);
+
+-- 4. Specifications
+INSERT INTO Specifications (name, product_id, quantity_per_product) VALUES
+('Основная Сметана 15%', 1, 1),
+('Основная Сметана 20%', 2, 1),
+('Кефирная спецификация', 3, 1);
+
+-- 5. SpecificationMaterials
+INSERT INTO SpecificationMaterials (spec_id, material_id, quantity) VALUES
+(1, 1, 0.9),
+(1, 2, 0.07),
+(2, 1, 0.85),
+(2, 2, 0.05),
+(3, 1, 0.95);
+
+-- 6. Orders
+INSERT INTO Orders (order_number, order_date, customer_id) VALUES
+('ЗК-000001', '2025-06-06', 3),
+('ЗК-000002', '2025-06-10', 1),
+('ЗК-000003', '2025-06-15', 2);
+
+-- 7. OrderItems (триггер автоматически обновит Orders.total_amount)
+INSERT INTO OrderItems (order_id, product_id, quantity, unit_price) VALUES
+(1, 1, 12, 80.00),
+(1, 2, 9, 82.00),
+(1, 3, 10, 70.00);
+
+INSERT INTO OrderItems (order_id, product_id, quantity, unit_price) VALUES
+(2, 1, 5, 80.00),
+(2, 2, 3, 82.00);
+
+INSERT INTO OrderItems (order_id, product_id, quantity, unit_price) VALUES
+(3, 3, 8, 70.00);
+
+-- 8. Production
+INSERT INTO Production (production_number, production_date) VALUES
+('ПР-000001', '2025-06-09'),
+('ПР-000002', '2025-06-12'),
+('ПР-000003', '2025-06-20');
+
+-- 9. ProductionProducts
+INSERT INTO ProductionProducts (production_id, product_id, quantity) VALUES
+(1, 1, 100),
+(1, 2, 80),
+(2, 3, 120);
+
+-- 10. ProductionMaterials
+INSERT INTO ProductionMaterials (production_id, material_id, quantity) VALUES
+(1, 1, 90),
+(1, 2, 7),
+(2, 1, 108);
+
+-- =====================================================
+-- ХРАНИМАЯ ПРОЦЕДУРА: Статистика за период
+-- =====================================================
+
+DELIMITER //
+
+CREATE PROCEDURE GetOrderStatistics(
+    IN p_start_date DATE,
+    IN p_end_date DATE
+)
+BEGIN
+    SELECT 
+        c.name AS Заказчик,
+        COUNT(DISTINCT o.order_id) AS Общее_количество_заказов,
+        SUM(oi.quantity) AS Общее_количество_продукции,
+        SUM(oi.quantity * oi.unit_price) AS Общая_сумма_заказов
+    FROM Orders o
+    JOIN Customers c ON o.customer_id = c.customer_id
+    JOIN OrderItems oi ON o.order_id = oi.order_id
+    WHERE o.order_date BETWEEN p_start_date AND p_end_date
+    GROUP BY c.customer_id, c.name
+    ORDER BY Общая_сумма_заказов DESC;
+END //
+
+DELIMITER ;
+
+-- =====================================================
+-- ПРИМЕРЫ ВЫЗОВОВ И ПРОВЕРОЧНЫЕ ЗАПРОСЫ
+-- =====================================================
+
+-- Вызов хранимой процедуры
+CALL GetOrderStatistics('2025-06-01', '2025-06-30');
+
+-- Просмотр заказов с итоговыми суммами (обновляются триггером)
+SELECT * FROM Orders;
+
+-- Расчет себестоимости продукции по спецификации (с учетом цен материалов)
+SELECT 
+    p.name AS Продукция,
+    SUM(sm.quantity * m.price) AS Себестоимость_материалов
+FROM Products p
+JOIN Specifications s ON p.product_id = s.product_id
+JOIN SpecificationMaterials sm ON s.spec_id = sm.spec_id
+JOIN Materials m ON sm.material_id = m.material_id
+GROUP BY p.product_id;
+
+-- Проверка работы триггера: общая сумма заказа №1 должна быть 12*80 + 9*82 + 10*70 = 960 + 738 + 700 = 2398
+SELECT order_id, total_amount FROM Orders WHERE order_id = 1;
